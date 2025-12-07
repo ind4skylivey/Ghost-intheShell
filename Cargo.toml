@@ -1,0 +1,24 @@
+[package]
+name = "ghost-shell"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Terminal & Input Handling (Raw Mode is critical)
+crossterm = "0.27"
+ratatui = "0.26"
+
+# Security & Cryptography
+zeroize = { version = "1.7", features = ["derive"] } # Memory scrubbing
+aes-gcm = "0.10" # Encryption
+sha2 = "0.10"    # Hashing for auth
+rand = "0.8"     # Secure randomness
+
+# System Interaction
+libc = "0.2"     # Low level calls
+users = "0.11"   # User ID handling
+arboard = "3.6.1"
+
+# Linux Specifics (For process masking)
+[target.'cfg(target_os = "linux")'.dependencies]
+prctl = "1.0"
