@@ -1,3 +1,6 @@
+
+<img width="1536" height="1024" alt="ghost" src="https://github.com/user-attachments/assets/c6bc43c9-2889-475c-b29f-728263452a5b" />
+
 # Ghost Shell (gsh)
 
 **Ghost Shell** is a secure, stealthy shell implementation in Rust designed for privacy and low-profile operations. It features process masking, secure memory handling, and built-in "ghost" commands for covert utilities.
