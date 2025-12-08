@@ -1,7 +1,28 @@
-
 <img width="1536" height="1024" alt="ghost" src="https://github.com/user-attachments/assets/c6bc43c9-2889-475c-b29f-728263452a5b" />
 
-# Ghost Shell (gsh)
+<div align="center">
+
+# 👻 Ghost Shell (gsh)
+
+[![Version](https://img.shields.io/badge/version-0.3.2-red?style=for-the-badge&logo=rust&logoColor=white)](https://github.com/ind4skylivey/Ghost-intheShell)
+[![Security Audit](https://img.shields.io/badge/Security_Audit-PASSED-brightgreen?style=for-the-badge&logo=shield&logoColor=white)](./SECURITY_AUDIT.md)
+[![Rust](https://img.shields.io/badge/Rust-000000?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](./LICENSE)
+
+---
+
+**🔴 RED TEAM TOOLS 🔴**
+
+[![Anti-Forensics](https://img.shields.io/badge/Anti--Forensics-Enabled-critical?style=flat-square&logo=ghost&logoColor=white)](.)
+[![Memory Safe](https://img.shields.io/badge/Memory-Zeroized-success?style=flat-square&logo=shield&logoColor=white)](.)
+[![Process Masking](https://img.shields.io/badge/Process-Masked-orange?style=flat-square&logo=linux&logoColor=white)](.)
+[![Encrypted Clipboard](https://img.shields.io/badge/Clipboard-ChaCha20-blueviolet?style=flat-square&logo=keybase&logoColor=white)](.)
+[![Anti-Debug](https://img.shields.io/badge/Anti--Debug-Active-red?style=flat-square&logo=bug&logoColor=white)](.)
+[![Paranoid Mode](https://img.shields.io/badge/Paranoid_Mode-Available-darkred?style=flat-square&logo=fire&logoColor=white)](.)
+
+---
+
+</div>
 
 **Ghost Shell** is a secure, stealthy shell implementation in Rust designed for privacy and low-profile operations. It features process masking, secure memory handling, and built-in "ghost" commands for covert utilities.
 
@@ -185,12 +206,13 @@ PARANOID MODE - INITIATING EMERGENCY SHUTDOWN...
 - **crossterm**: Terminal manipulation and raw mode
 - **zeroize**: Secure memory scrubbing
 - **arboard**: Cross-platform clipboard access
+- **chacha20poly1305**: Authenticated encryption
 - **prctl** (Linux): Process name masking
 
 ### Architecture
 
-- **Single-file implementation**: `src/main.rs` (~400 lines)
-- **SecureBuffer**: Zeroizes command content on drop
+- **Modular implementation**: `main.rs`, `security.rs`, `clipboard.rs`
+- **SecureBuffer**: Custom Drop for complete memory zeroization
 - **CommandResult enum**: Type-safe command execution flow
 - **Raw mode terminal**: Full control over input/output
 
@@ -200,21 +222,88 @@ This tool is for **educational and ethical testing purposes only**. The authors 
 
 ## 🛣️ Roadmap
 
+### ✅ v0.1.0 - Initial Release
+
+- [x] Process masking (Linux) as `systemd-journald`
+- [x] Volatile command history (RAM only)
+- [x] Ghost commands: `::status`, `::cp`, `::clear`, `::exit`, `::panic`
+- [x] Secure memory handling with `zeroize`
+- [x] Raw mode terminal with crossterm
+- [x] Basic autocomplete (single match)
+- [x] Command history navigation with arrow keys
+- [x] Dynamic prompt with current directory
+
+### ✅ v0.2.0 - Bug Fixes & History Management
+
 - [x] Fix `::exit` bug with proper enum handling
-- [x] Add `::history` and `::purge-history` commands
-- [x] Remove unused dependencies
-- [ ] Modularize code into separate files
-- [ ] Add unit tests for core functionality
-- [ ] Improve autocomplete (show multiple matches)
-- [ ] Add optional configuration file (colors, prompt)
-- [ ] Implement paranoid mode (no history at all)
+- [x] Add `::history` command to view RAM-stored commands
+- [x] Add `::purge-history` command with secure zeroization
+- [x] Remove unused dependencies (reduced binary size)
+- [x] CommandResult enum for type-safe execution flow
+- [x] Comprehensive threat model documentation
+
+### ✅ v0.3.0 - Advanced Security Features
+
+- [x] Modularize code into separate files (`security.rs`, `clipboard.rs`)
+- [x] Encrypted clipboard with ChaCha20Poly1305 (AEAD)
+- [x] Auto-clear clipboard after 30 seconds
+- [x] `::decrypt <key>` command to recover encrypted data
+- [x] `::security-status` command with detailed analysis
+- [x] Swap detection (warns if memory may be swapped to disk)
+- [x] Monitoring tool detection (strace, gdb, auditd, eBPF, etc.)
+- [x] ptrace detection (debugger attachment)
+
+### ✅ v0.3.1 - Paranoid Mode
+
+- [x] `::paranoid on|off` command for maximum security
+- [x] Auto-panic when debugger is detected
+- [x] Periodic security checks every 5 commands
+- [x] Enhanced `::anti-debug` with auto-exit in paranoid mode
+- [x] Command counter for security monitoring
+
+### ✅ v0.3.2 - Security Audit Fixes
+
+- [x] Custom Drop for complete history zeroization on exit
+- [x] Base64 key zeroization after display
+- [x] Comprehensive security audit (92% score)
+- [x] SECURITY_AUDIT.md documentation
+
+### ⏳ Planned - v0.4.0 (Short Term)
+
+- [ ] Unit tests for security functions
+- [ ] Memory locking (`mlock`) for sensitive buffers
+- [ ] Core dump prevention (`madvise(MADV_DONTDUMP)`)
+- [ ] Clipboard clear command (`::clear-clipboard`)
+- [ ] Session key for persistent encryption
+
+### 🔮 Future - v0.5.0+ (Long Term)
+
+- [ ] Configuration file support (colors, prompt, timeout)
+- [ ] Improved autocomplete (show multiple matches)
 - [ ] Better UTF-8/grapheme cluster support
-- [ ] Optional encryption for clipboard data
+- [ ] Timing attack detection
+- [ ] String obfuscation for sensitive constants
+- [ ] Self-integrity checks (detect binary modification)
+- [ ] Anti-VM/sandbox detection
+- [ ] Network-based threat intelligence
+- [ ] Plugin system for custom ghost commands
 
 ## 📄 License
 
-This is a personal project. Unauthorized copying or distribution of this software is strictly prohibited. All rights reserved.
+This is a personal project for educational purposes. See LICENSE file for details.
 
 ---
 
-**Made with 🦀 Rust and 👻 paranoia**
+<div align="center">
+
+### 🔴 Built for Red Team Operations 🔴
+
+[![Made with Rust](https://img.shields.io/badge/Made_with-Rust-b7410e?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![Security First](https://img.shields.io/badge/Security-First-darkred?style=for-the-badge&logo=hackaday&logoColor=white)](.)
+[![Zero Traces](https://img.shields.io/badge/Zero-Traces-black?style=for-the-badge&logo=ghost&logoColor=white)](.)
+
+**👻 Stay Ghost. Stay Secure. 👻**
+
+_For educational and authorized security research only._
+
+</div>
