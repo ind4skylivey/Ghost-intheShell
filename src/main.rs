@@ -1,24 +1,69 @@
-use std::io::{self, Write};
-use std::ffi::CString;
-use std::process::Command;
-use std::env;
-use std::fs;
-use std::path::Path;
+mod clipboard;
+mod security;
+
 use crossterm::{
+    cursor::MoveToColumn,
     event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
-    terminal::{enable_raw_mode, disable_raw_mode, Clear, ClearType},
-    cursor::{MoveToColumn},
+    execute, queue,
     style::Print,
-    execute,
-    queue,
+    terminal::{disable_raw_mode, enable_raw_mode, Clear, ClearType},
 };
+use std::env;
+use std::ffi::CString;
+use std::fs;
+use std::io::{self, Write};
+use std::path::Path;
+use std::process::Command;
 use zeroize::{Zeroize, ZeroizeOnDrop};
-use arboard::Clipboard;
+
+use crate::clipboard::SecureClipboard;
+use crate::security::{initialize_security, is_debugger_present, SecurityStatus};
 
 // --- CONSTANTS ---
 const GHOST_COMMAND_PREFIX: &str = "::";
 
+// --- ENUMS ---
+
+/// Result of command execution
+enum CommandResult {
+    /// No output, continue normally
+    NoOp,
+    /// Command produced output
+    Output(String),
+    /// Exit the shell
+    Exit,
+}
+
 // --- STRUCTURES ---
+
+/// Main Ghost Shell state (reserved for future refactoring)
+#[allow(dead_code)]
+struct GhostShell {
+    buffer: SecureBuffer,
+    security_status: SecurityStatus,
+    clipboard: SecureClipboard,
+    clipboard_timeout: u64, // seconds
+    encryption_enabled: bool,
+}
+
+#[allow(dead_code)]
+impl GhostShell {
+    fn new() -> Result<Self, String> {
+        let security_status = initialize_security();
+        let encryption_enabled = true; // Default to encrypted clipboard
+        let clipboard_timeout = 30; // 30 seconds default
+
+        let clipboard = SecureClipboard::new(encryption_enabled)?;
+
+        Ok(GhostShell {
+            buffer: SecureBuffer::new(),
+            security_status,
+            clipboard,
+            clipboard_timeout,
+            encryption_enabled,
+        })
+    }
+}
 
 #[derive(Zeroize, ZeroizeOnDrop)]
 struct SecureBuffer {
@@ -28,7 +73,11 @@ struct SecureBuffer {
     #[zeroize(skip)]
     history_index: usize, // Points to index in history. history.len() = new line.
     #[zeroize(skip)]
-    cursor_pos: usize,    // Cursor position within 'content' (chars)
+    cursor_pos: usize, // Cursor position within 'content' (chars)
+    #[zeroize(skip)]
+    command_count: usize, // Track number of commands executed
+    #[zeroize(skip)]
+    paranoid_mode: bool, // Auto-panic on threat detection
 }
 
 impl SecureBuffer {
@@ -38,6 +87,8 @@ impl SecureBuffer {
             history: Vec::new(),
             history_index: 0,
             cursor_pos: 0,
+            command_count: 0,
+            paranoid_mode: false, // Can be enabled with ::paranoid command
         }
     }
 
@@ -116,8 +167,11 @@ impl SecureBuffer {
             } else {
                 Path::new(".")
             };
-            
-            let prefix = Path::new(last_word).file_name().and_then(|s| s.to_str()).unwrap_or("");
+
+            let prefix = Path::new(last_word)
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("");
 
             if let Ok(entries) = fs::read_dir(path_to_check) {
                 let matches: Vec<String> = entries
@@ -144,17 +198,38 @@ impl SecureBuffer {
         self.history_index = self.history.len();
     }
 
+    /// Securely purge command history from memory
+    fn purge_history(&mut self) {
+        // Zeroize each string in history before clearing
+        for cmd in self.history.iter_mut() {
+            cmd.zeroize();
+        }
+        self.history.clear();
+        self.history_index = 0;
+    }
+
     // --- EXECUTION ---
 
-    fn process_command(&self) -> String {
+    fn process_command(&mut self) -> CommandResult {
         let trimmed_command = self.content.trim();
 
         if trimmed_command.is_empty() {
-            return String::new();
+            return CommandResult::NoOp;
         }
 
-        if trimmed_command.starts_with(GHOST_COMMAND_PREFIX) {
-            let ghost_cmd = &trimmed_command[GHOST_COMMAND_PREFIX.len()..];
+        // Increment command counter
+        self.command_count += 1;
+
+        // Periodic security check in paranoid mode (every 5 commands)
+        if self.paranoid_mode && self.command_count.is_multiple_of(5) && is_debugger_present() {
+            let _ = execute!(io::stdout(), Clear(ClearType::All), MoveToColumn(0));
+            println!("⚠ PERIODIC CHECK: DEBUGGER DETECTED");
+            println!("PARANOID MODE - INITIATING EMERGENCY SHUTDOWN...");
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            std::process::exit(137);
+        }
+
+        if let Some(ghost_cmd) = trimmed_command.strip_prefix(GHOST_COMMAND_PREFIX) {
             let parts: Vec<&str> = ghost_cmd.splitn(2, ' ').collect();
             let cmd = parts[0];
             let args = if parts.len() > 1 { parts[1] } else { "" };
@@ -167,34 +242,109 @@ impl SecureBuffer {
                     println!("Dumping core to /dev/null...");
                     std::thread::sleep(std::time::Duration::from_millis(1500));
                     std::process::exit(137); // Simulated crash
-                },
-                "status" => "GHOST MODE ACTIVE. MEMORY SECURE. TRACE: NONE.".to_string(),
-                "exit" => "TERMINATING".to_string(),
+                }
+                "status" => CommandResult::Output(
+                    "GHOST MODE ACTIVE. MEMORY SECURE. TRACE: NONE.".to_string(),
+                ),
+                "security-status" => {
+                    let status = initialize_security();
+                    CommandResult::Output(status.report())
+                }
+                "exit" => CommandResult::Exit,
                 "clear" => {
-                   // Handled in main loop for full screen clear, but we can return empty here
-                   // Actually, we'll let main handle the printing, but if we want to clear *screen*
-                   // we should do it here or signal main.
-                   // Let's just return a signal string or handle it directly?
-                   // Direct handling is better for visual effects.
-                   let _ = execute!(io::stdout(), Clear(ClearType::All), MoveToColumn(0));
-                   String::new() 
-                },
+                    let _ = execute!(io::stdout(), Clear(ClearType::All), MoveToColumn(0));
+                    CommandResult::NoOp
+                }
+                "history" => {
+                    if self.history.is_empty() {
+                        CommandResult::Output("No commands in history.".to_string())
+                    } else {
+                        let mut output = String::from("Command History (RAM only):\r\n");
+                        for (i, cmd) in self.history.iter().enumerate() {
+                            output.push_str(&format!("  {}: {}\r\n", i + 1, cmd));
+                        }
+                        CommandResult::Output(output)
+                    }
+                }
+                "purge-history" => {
+                    let count = self.history.len();
+                    self.purge_history();
+                    CommandResult::Output(format!(
+                        "HISTORY PURGED. {} COMMANDS ZEROIZED FROM MEMORY.",
+                        count
+                    ))
+                }
                 "cp" => {
                     if args.is_empty() {
-                        "Error: No content to copy.".to_string()
+                        CommandResult::Output("Error: No content to copy.".to_string())
                     } else {
-                        match Clipboard::new() {
-                            Ok(mut clipboard) => {
-                                match clipboard.set_text(args) {
-                                    Ok(_) => "DATA INJECTED TO CLIPBOARD. TRACES REMOVED.".to_string(),
-                                    Err(e) => format!("Clipboard Error: {}", e),
+                        match SecureClipboard::new(true) {
+                            Ok(clipboard) => {
+                                match clipboard.copy_with_timeout(args.to_string(), 30) {
+                                    Ok(msg) => CommandResult::Output(msg),
+                                    Err(e) => CommandResult::Output(e),
                                 }
-                            },
-                            Err(e) => format!("Clipboard Access Error: {}", e),
+                            }
+                            Err(e) => CommandResult::Output(e),
                         }
                     }
-                },
-                _ => format!("Unknown GHOST command: '{}'", cmd),
+                }
+                "decrypt" => {
+                    if args.is_empty() {
+                        CommandResult::Output("Usage: ::decrypt <key>".to_string())
+                    } else {
+                        match SecureClipboard::new(false) {
+                            Ok(clipboard) => match clipboard.decrypt_clipboard(args) {
+                                Ok(plaintext) => {
+                                    CommandResult::Output(format!("Decrypted: {}", plaintext))
+                                }
+                                Err(e) => CommandResult::Output(e),
+                            },
+                            Err(e) => CommandResult::Output(e),
+                        }
+                    }
+                }
+                "anti-debug" => {
+                    if is_debugger_present() {
+                        if self.paranoid_mode {
+                            // Auto-panic in paranoid mode
+                            let _ = execute!(io::stdout(), Clear(ClearType::All), MoveToColumn(0));
+                            println!("⚠ DEBUGGER DETECTED - PARANOID MODE ACTIVE");
+                            println!("INITIATING EMERGENCY SHUTDOWN...");
+                            std::thread::sleep(std::time::Duration::from_millis(500));
+                            std::process::exit(137);
+                        } else {
+                            CommandResult::Output("⚠ WARNING: DEBUGGER DETECTED!".to_string())
+                        }
+                    } else {
+                        CommandResult::Output("✓ No debugger detected.".to_string())
+                    }
+                }
+                "paranoid" => {
+                    if args == "on" {
+                        self.paranoid_mode = true;
+                        CommandResult::Output(
+                            "⚠ PARANOID MODE ENABLED\r\n\
+                            - Auto-panic on debugger detection\r\n\
+                            - Periodic security checks every 5 commands\r\n\
+                            - Enhanced threat monitoring"
+                                .to_string(),
+                        )
+                    } else if args == "off" {
+                        self.paranoid_mode = false;
+                        CommandResult::Output("PARANOID MODE DISABLED".to_string())
+                    } else {
+                        CommandResult::Output(format!(
+                            "Paranoid mode: {}\r\nUsage: ::paranoid on|off",
+                            if self.paranoid_mode {
+                                "ENABLED"
+                            } else {
+                                "DISABLED"
+                            }
+                        ))
+                    }
+                }
+                _ => CommandResult::Output(format!("Unknown GHOST command: '{}'", cmd)),
             }
         } else {
             // Built-in: cd
@@ -206,15 +356,15 @@ impl SecureBuffer {
                     _ => path_str.to_string(),
                 };
                 match env::set_current_dir(&path) {
-                    Ok(_) => return String::new(),
-                    Err(e) => return format!("cd: {}", e),
+                    Ok(_) => return CommandResult::NoOp,
+                    Err(e) => return CommandResult::Output(format!("cd: {}", e)),
                 }
             }
-            
+
             // Built-in: clear (standard shell alias)
             if parts[0] == "clear" {
-                 let _ = execute!(io::stdout(), Clear(ClearType::All), MoveToColumn(0));
-                 return String::new();
+                let _ = execute!(io::stdout(), Clear(ClearType::All), MoveToColumn(0));
+                return CommandResult::NoOp;
             }
 
             let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
@@ -223,15 +373,19 @@ impl SecureBuffer {
                     let stdout = String::from_utf8_lossy(&output.stdout);
                     let stderr = String::from_utf8_lossy(&output.stderr);
                     let mut result = String::new();
-                    if !stdout.is_empty() { result.push_str(&stdout); }
+                    if !stdout.is_empty() {
+                        result.push_str(&stdout);
+                    }
                     if !stderr.is_empty() {
-                        if !result.is_empty() { result.push_str("\r\n"); }
+                        if !result.is_empty() {
+                            result.push_str("\r\n");
+                        }
                         result.push_str("STDERR:\r\n");
                         result.push_str(&stderr);
                     }
-                    result.replace("\n", "\r\n")
-                },
-                Err(e) => format!("Failed to execute process: {}\r\n", e),
+                    CommandResult::Output(result.replace("\n", "\r\n"))
+                }
+                Err(e) => CommandResult::Output(format!("Failed to execute process: {}\r\n", e)),
             }
         }
     }
@@ -246,7 +400,7 @@ fn get_current_prompt() -> String {
         .unwrap_or_else(|| "gsh".as_ref())
         .to_string_lossy()
         .to_string();
-    format!("gsh {}}}> ", current_dir)
+    format!("gsh {}>> ", current_dir)
 }
 
 fn redraw_line(stdout: &mut io::Stdout, buffer: &SecureBuffer) -> io::Result<()> {
@@ -273,7 +427,7 @@ fn main() -> io::Result<()> {
     }
 
     println!("Initializing Ghost Shell protocol...");
-    
+
     // 2. RAW MODE ACQUISITION
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -287,7 +441,10 @@ fn main() -> io::Result<()> {
 
     while running {
         if event::poll(std::time::Duration::from_millis(100))? {
-            if let Event::Key(KeyEvent { code, modifiers, .. }) = event::read()? {
+            if let Event::Key(KeyEvent {
+                code, modifiers, ..
+            }) = event::read()?
+            {
                 match code {
                     KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
                         buffer.content.clear();
@@ -297,24 +454,30 @@ fn main() -> io::Result<()> {
                     }
                     KeyCode::Char('l') if modifiers.contains(KeyModifiers::CONTROL) => {
                         // Ctrl+L to clear screen
-                         execute!(stdout, Clear(ClearType::All), MoveToColumn(0))?;
-                         redraw_line(&mut stdout, &buffer)?;
+                        execute!(stdout, Clear(ClearType::All), MoveToColumn(0))?;
+                        redraw_line(&mut stdout, &buffer)?;
                     }
                     KeyCode::Enter => {
                         write!(stdout, "\r\n")?;
-                        
-                        // Process
-                        let output = buffer.process_command();
-                        
-                        if buffer.content.trim() == format!("{}\"exit\"", GHOST_COMMAND_PREFIX) {
-                            running = false;
-                        } else {
-                            if !output.is_empty() {
-                                write!(stdout, "{}\r\n", output)?;
+
+                        // Process command and handle result
+                        let result = buffer.process_command();
+
+                        match result {
+                            CommandResult::Exit => {
+                                running = false;
                             }
-                            buffer.commit_history();
-                            buffer.clear_state();
-                            redraw_line(&mut stdout, &buffer)?;
+                            CommandResult::Output(output) => {
+                                write!(stdout, "{}\r\n", output)?;
+                                buffer.commit_history();
+                                buffer.clear_state();
+                                redraw_line(&mut stdout, &buffer)?;
+                            }
+                            CommandResult::NoOp => {
+                                buffer.commit_history();
+                                buffer.clear_state();
+                                redraw_line(&mut stdout, &buffer)?;
+                            }
                         }
                     }
                     KeyCode::Char(c) => {
