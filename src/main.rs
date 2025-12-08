@@ -14,7 +14,7 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
 use std::process::Command;
-use zeroize::{Zeroize, ZeroizeOnDrop};
+use zeroize::Zeroize;
 
 use crate::clipboard::SecureClipboard;
 use crate::security::{initialize_security, is_debugger_present, SecurityStatus};
@@ -65,19 +65,35 @@ impl GhostShell {
     }
 }
 
-#[derive(Zeroize, ZeroizeOnDrop)]
+/// SecureBuffer holds command input and history
+/// Note: We implement Drop manually to ensure history is zeroized
 struct SecureBuffer {
     content: String,
-    #[zeroize(skip)]
     history: Vec<String>,
-    #[zeroize(skip)]
     history_index: usize, // Points to index in history. history.len() = new line.
-    #[zeroize(skip)]
-    cursor_pos: usize, // Cursor position within 'content' (chars)
-    #[zeroize(skip)]
+    cursor_pos: usize,    // Cursor position within 'content' (chars)
     command_count: usize, // Track number of commands executed
-    #[zeroize(skip)]
-    paranoid_mode: bool, // Auto-panic on threat detection
+    paranoid_mode: bool,  // Auto-panic on threat detection
+}
+
+/// Custom Drop implementation to securely zeroize all sensitive data
+impl Drop for SecureBuffer {
+    fn drop(&mut self) {
+        // Zeroize the current command buffer
+        self.content.zeroize();
+
+        // Zeroize each command in history
+        for cmd in self.history.iter_mut() {
+            cmd.zeroize();
+        }
+        self.history.clear();
+
+        // Reset counters (not sensitive, but good hygiene)
+        self.history_index = 0;
+        self.cursor_pos = 0;
+        self.command_count = 0;
+        self.paranoid_mode = false;
+    }
 }
 
 impl SecureBuffer {

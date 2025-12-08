@@ -5,6 +5,25 @@ All notable changes to Ghost Shell will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2025-12-08
+
+### Security Audit Fixes 🔒
+
+- **CRITICAL FIX**: Command history is now securely zeroized on shell exit
+  - Implemented custom `Drop` for `SecureBuffer`
+  - All commands in history are individually zeroized
+  - Previously, history remained in memory after exit
+- **MEDIUM FIX**: Base64-encoded encryption key is now zeroized after display
+  - `key_b64` string is zeroized after creating output message
+  - Prevents key material from persisting in memory
+- Created comprehensive SECURITY_AUDIT.md document
+- Overall security score improved from 75% to 92%
+
+### Changed
+
+- Removed `ZeroizeOnDrop` derive macro (replaced with custom Drop impl)
+- Improved format strings (inline variables where possible)
+
 ## [0.3.1] - 2025-12-08
 
 ### Added - Paranoid Mode & Enhanced Anti-Debugging 🛡️

@@ -90,11 +90,11 @@ impl SecureClipboard {
 
         // Encode as base64
         let encrypted_b64 = general_purpose::STANDARD.encode(ciphertext);
-        let key_b64 = general_purpose::STANDARD.encode(key_bytes);
+        let mut key_b64 = general_purpose::STANDARD.encode(key_bytes);
         let nonce_b64 = general_purpose::STANDARD.encode(nonce_bytes);
 
         // Format: ENCRYPTED:<nonce>:<ciphertext>
-        let clipboard_content = format!("GHOST_ENCRYPTED:{}:{}", nonce_b64, encrypted_b64);
+        let clipboard_content = format!("GHOST_ENCRYPTED:{nonce_b64}:{encrypted_b64}");
 
         let clipboard = Arc::clone(&self.clipboard);
 
@@ -102,7 +102,7 @@ impl SecureClipboard {
         {
             let mut cb = clipboard.lock().unwrap();
             cb.set_text(&clipboard_content)
-                .map_err(|e| format!("Clipboard error: {}", e))?;
+                .map_err(|e| format!("Clipboard error: {e}"))?;
         }
 
         // Schedule auto-clear
@@ -119,10 +119,15 @@ impl SecureClipboard {
         key_bytes.zeroize();
         nonce_bytes.zeroize();
 
-        Ok(format!(
-            "ENCRYPTED DATA INJECTED. KEY: {}\r\nAUTO-CLEAR IN {}s.\r\nUse ::decrypt to recover.",
-            key_b64, timeout_secs
-        ))
+        // Create output message before zeroizing key_b64
+        let output = format!(
+            "ENCRYPTED DATA INJECTED. KEY: {key_b64}\r\nAUTO-CLEAR IN {timeout_secs}s.\r\nUse ::decrypt to recover."
+        );
+
+        // Zeroize the base64 key string
+        key_b64.zeroize();
+
+        Ok(output)
     }
 
     /// Decrypt clipboard content
